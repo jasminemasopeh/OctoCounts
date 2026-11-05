@@ -17,6 +17,7 @@ function reportCitation(report: Report) {
   if (!options.includeDocs) toggles.push("docs excluded");
   if (!options.includeGenerated) toggles.push("generated excluded");
   if (options.profile && options.profile !== "default") toggles.push(`profile: ${options.profile}`);
+  if (options.path) toggles.push(`path: ${options.path}`);
   // Public report pages use the canonical options; only other sets are "custom".
   const configuration = isCanonicalAnalysisOptions(options)
     ? "canonical public options (tests, docs and generated files excluded)"

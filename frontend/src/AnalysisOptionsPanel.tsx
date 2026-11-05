@@ -9,6 +9,7 @@ export const defaultAnalysisOptions: AnalysisOptions = {
   includeDocs: true,
   includeTests: true,
   includeGenerated: true,
+  path: "",
 };
 
 export const canonicalAnalysisOptions: AnalysisOptions = { ...defaultAnalysisOptions, includeDocs: false, includeTests: false, includeGenerated: false };
@@ -26,6 +27,7 @@ function countModifiedAnalysisOptions(options: AnalysisOptions, defaults: Analys
   if (options.includeTests !== defaults.includeTests) count += 1;
   if (options.includeGenerated !== defaults.includeGenerated) count += 1;
   if (Boolean(options.respectGitattributes) !== Boolean(defaults.respectGitattributes)) count += 1;
+  if ((options.path ?? "") !== (defaults.path ?? "")) count += 1;
   return count;
 }
 
@@ -102,6 +104,7 @@ export function parseAnalysisOptions(value: string | null): AnalysisOptions | nu
       includeTests: typeof parsed.includeTests === "boolean" ? parsed.includeTests : true,
       includeGenerated: typeof parsed.includeGenerated === "boolean" ? parsed.includeGenerated : true,
       respectGitattributes: parsed.respectGitattributes === true,
+      path: typeof parsed.path === "string" ? parsed.path : "",
     };
   } catch {
     return null;

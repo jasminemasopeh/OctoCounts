@@ -39,6 +39,7 @@ import type { AnalysisOptions, GrowthRepositoryStat, GrowthStats, Report, Stats 
 import type { JobRecord } from "./types";
 import { useAnalysisRunner } from "./useAnalysisRunner";
 import { AnalysisOptionsPanel, defaultAnalysisOptions, parseAnalysisOptions } from "./AnalysisOptionsPanel";
+import { parseGithubBrowseUrl } from "./githubUrl";
 
 // The homepage extension promo comes from the injection context (see
 // prerenderContext.ts): lazy on plain SPA loads, eager on the prerendered
@@ -302,7 +303,6 @@ export function App() {
   const initialRequest = useMemo(() => initialRequestFromLocation(), []);
   const [repoUrl, setRepoUrl] = useState(() => initialRequest.repoUrl);
   const [refName, setRefName] = useState(() => initialRequest.refName);
-  const [ambiguousRef, setAmbiguousRef] = useState(() => hasAmbiguousRefPath(initialRequest.repoUrl));
   // Pre-hydration typing adoption (see adoptPreHydrationInput). This also
   // means an adopted (typed) value does NOT trigger the auto-run below: the
   // [] effect closes over the first render's URL-derived repoUrl, and typing
@@ -485,23 +485,23 @@ export function App() {
           onChange={(event) => {
             const next = event.target.value;
             setRepoUrl(next);
-            setAmbiguousRef(hasAmbiguousRefPath(next));
+            const parsed = parseGithubBrowseUrl(next);
+            // Sync subdirectory scope from browse URLs on every edit so a
+            // pasted /tree/ref/folder/... counts that folder, and a plain
+            // repo URL clears a previously derived path.
+            if (parsed) {
+              setAnalysisOptions((options) => ({ ...options, path: parsed.path }));
+            }
             // Only a fresh homepage form may derive a ref from the URL.
             // A hand-entered value — including an intentional blank — is
             // a stronger choice than any pasted tree path. A plain
             // repository URL leaves the ref blank: the backend resolves
             // the actual default branch (which may not be `main`).
-            if (!refIsExplicit.current) {
-              const urlRef = refFromRepoUrl(next);
-              if (urlRef) {
-                refIsExplicit.current = true;
-                setRefName(urlRef);
-              } else if (hasAmbiguousRefPath(next)) {
-                // An ambiguous /tree/:ref/path URL asks the backend for
-                // the repository default branch instead of guessing.
-                refIsExplicit.current = true;
-                setRefName("");
-              }
+            // /tree/{ref}/{path…} uses first-segment-as-ref; slashy branch
+            // names still need the Ref field set manually.
+            if (!refIsExplicit.current && parsed?.refName) {
+              refIsExplicit.current = true;
+              setRefName(parsed.refName);
             }
           }}
           placeholder={t("hero.placeholderUrl")}
@@ -527,7 +527,7 @@ export function App() {
       <div ref={analysisOptionsRef}>
         <AnalysisOptionsPanel key={optionsPanelKey} options={analysisOptions} setOptions={setAnalysisOptions} />
       </div>
-      {ambiguousRef ? <p className="input-hint" role="status">{t("hero.ambiguousRef")}</p> : null}
+      {analysisOptions.path ? <p className="input-hint" role="status">{t("hero.scopedPath", { path: analysisOptions.path })}</p> : null}
     </>
   );
 
@@ -863,76 +863,8 @@ function ToolsGrid() {
   );
 }
 
-// Path segments after which a github.com URL names a ref.
-const githubRefMarkers = new Set(["tree", "blob", "commit", "commits"]);
-
-/**
- * Reads the ref out of a pasted browse URL, so pasting
- * `https://github.com/owner/repo/tree/master` and pressing Analyze counts
- * `master`. The scheme is part of that: `new URL` throws without one, and the
- * catch below returns `""`. Nothing is lost by it — `parse_repo_url` rejects a
- * scheme-less string as `invalid_url`, so the submit fails either way, and the
- * `git@github.com:` form `parsePublicRepo` accepts cannot carry a browse path.
- *
- * Only the unambiguous shape counts: exactly one segment after the marker.
- * `/tree/main/src` is either branch `main` plus a directory or a branch named
- * `main/src`, and neither side can tell which: the API takes `refName` as an
- * opaque string, and `parse_repo_url` in `backend/src/github.rs` keeps only the
- * first two path segments, so the browse suffix never reaches the resolver.
- *
- * An ambiguous URL therefore leaves the field empty, which is a request, not a
- * guess: `resolve_github_ref` drops a blank ref and resolves the repository's
- * `default_branch` instead. The cost is that `/tree/develop/src` is counted on
- * the default branch rather than on `develop` — and succeeds, so there is no
- * error to notice. What there is instead is the ref itself: `report.refName` is
- * the ref the server resolved, and both the runner header and the trust panel's
- * REF row print it with no interaction, so the mismatch with the pasted URL is
- * on the page rather than only in the request. (`RunnerLog`'s
- * `resolved <ref> -> <sha>` repeats it, but that one is behind the collapsed
- * `run details` disclosure and does not count as surfaced.)
- *
- * Guessing `segments[3]` instead would send `release` for `/tree/release/1.0`
- * and turn a URL that names its ref exactly into a `ref_not_found`; slashes are
- * legal in a ref name and there is no local way to tell one from a directory.
- */
-function refFromRepoUrl(value: string) {
-  try {
-    const url = new URL(value.trim());
-    if (url.hostname !== "github.com") return "";
-    const segments = url.pathname.split("/").filter(Boolean);
-    if (segments.length !== 4 || !githubRefMarkers.has(segments[2])) return "";
-    return decodeRefSegment(segments[3]);
-  } catch {
-    return "";
-  }
-}
-
-function hasAmbiguousRefPath(value: string) {
-  try {
-    const url = new URL(value.trim());
-    const segments = url.pathname.split("/").filter(Boolean);
-    return url.hostname === "github.com" && segments.length > 4 && githubRefMarkers.has(segments[2]);
-  } catch {
-    return false;
-  }
-}
-
-/**
- * `url.pathname` is percent-encoded, but the ref goes to the API as data and is
- * re-encoded by `encodeRefPath` on the way into links. Decoded here it matches
- * what `parsePublicReportPath` produces from the same ref; left encoded it
- * became the ref name `release%2020.1` and double-encoded from there.
- *
- * A bare `%` throws and is not an error: `100%` is a legal branch name, so an
- * undecodable segment is kept rather than silently falling back to the default
- * branch.
- */
-function decodeRefSegment(segment: string) {
-  try {
-    return decodeURIComponent(segment);
-  } catch {
-    return segment;
-  }
+function mergePathIntoOptions(base: AnalysisOptions | null | undefined, path: string): AnalysisOptions {
+  return { ...(base ?? defaultAnalysisOptions), path };
 }
 
 function initialRequestFromLocation() {
@@ -941,10 +873,22 @@ function initialRequestFromLocation() {
   const queryRef = params.get("ref") ?? "";
   const analysisOptions = parseAnalysisOptions(params.get("analysis"));
   const reportId = params.get("reportId") || undefined;
-  if (queryRepo) return { repoUrl: queryRepo, refName: queryRef, analysisOptions, reportId };
+  if (queryRepo) {
+    const parsed = parseGithubBrowseUrl(queryRepo);
+    const path = analysisOptions?.path || parsed?.path || "";
+    return {
+      repoUrl: queryRepo,
+      refName: queryRef || parsed?.refName || "",
+      analysisOptions: mergePathIntoOptions(analysisOptions, path),
+      reportId,
+    };
+  }
 
   const route = parsePublicReportPath(window.location.pathname);
-  if (route) return { ...route, analysisOptions, reportId };
+  if (route) {
+    const path = analysisOptions?.path || route.path || "";
+    return { ...route, analysisOptions: mergePathIntoOptions(analysisOptions, path), reportId };
+  }
 
   // A brand-new homepage form starts with a blank ref (blank = the
   // repository's default branch); the flag only marks the form as fresh so
@@ -969,8 +913,15 @@ function parsePublicReportPath(pathname: string) {
     const owner = segments[1];
     const repo = segments[2];
     const marker = segments[3];
+    if (marker === "tree" && segments.length >= 5) {
+      return {
+        repoUrl: `https://github.com/${owner}/${repo}`,
+        refName: segments[4],
+        path: segments.slice(5).join("/"),
+      };
+    }
     const refName = marker === "tree" || marker === "commit" ? segments.slice(4).join("/") : "";
-    return { repoUrl: `https://github.com/${owner}/${repo}`, refName };
+    return { repoUrl: `https://github.com/${owner}/${repo}`, refName, path: "" };
   }
   return null;
 }

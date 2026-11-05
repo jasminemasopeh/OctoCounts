@@ -5,9 +5,11 @@ import type { Report } from "../types";
 export function TrustDetails({ report, stars }: { report: Report; stars?: number | null }) {
   const { t } = useTranslation();
   const policy = report.countingPolicy;
+  const scopedPath = report.analysisOptions.path?.trim();
   const details = [
     { label: t("trust.commit"), value: report.commitSha },
     { label: t("trust.ref"), value: report.refName },
+    ...(scopedPath ? [{ label: t("trust.path"), value: scopedPath }] : []),
     { label: t("trust.counter"), value: report.tokeiVersion },
     { label: t("trust.cache"), value: report.cached ? t("runner.cacheHit") : t("runner.freshRun") },
     ...(typeof stars === "number" ? [{ label: t("trust.stars"), value: formatCompactNumber(stars) }] : []),

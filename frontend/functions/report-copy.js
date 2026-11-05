@@ -34,7 +34,8 @@ export function isCanonicalAnalysisOptions(options) {
     && (options.profile ?? "default") === "default"
     && !(Array.isArray(options.ignoredDirs) && options.ignoredDirs.length)
     && !(Array.isArray(options.ignoredLanguages) && options.ignoredLanguages.length)
-    && !options.respectGitattributes;
+    && !options.respectGitattributes
+    && !(typeof options.path === "string" && options.path.length);
 }
 
 /// Short label for options that narrow a count beyond the canonical public
@@ -53,6 +54,7 @@ export function analysisOptionsLabel(options) {
   ];
   if (ignored.length) parts.push(`${ignored.length} custom ${ignored.length === 1 ? "ignore" : "ignores"}`);
   if (options.respectGitattributes) parts.push("repository declarations applied");
+  if (typeof options.path === "string" && options.path.length) parts.push(`path ${options.path}`);
   return parts.length ? parts.join(", ") : null;
 }
 

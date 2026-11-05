@@ -14,6 +14,8 @@ export type AnalysisOptions = {
   includeTests: boolean;
   includeGenerated: boolean;
   respectGitattributes?: boolean;
+  /** Repository-relative folder to count; empty/undefined counts the whole repo. */
+  path?: string;
 };
 
 export type CountingPolicy = {
